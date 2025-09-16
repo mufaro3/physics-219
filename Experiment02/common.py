@@ -8,6 +8,7 @@ from enum import Enum
 from PIL import Image
 import io
 from abc import ABC, abstractmethod
+from tabulate import tabulate
 
 @dataclass
 class GraphingOptions:
@@ -98,11 +99,30 @@ class FitParameters(ABC):
     def as_tuple(self): ...
     
     @abstractmethod
+    def as_tuple_uncert(self): ...
+    
+    @abstractmethod
     def as_equation_string(self): ...
     
     @classmethod
     @abstractmethod
     def labels(): ...
+    
+    def tabulate(self, units=None):
+        def apply_units(label, i):
+            if units is None or len(units) <= i:
+                return label
+            else:
+                return f'{label} ({units[i]})'
+        
+        labels  = self.labels()
+        values  = self.as_tuple()
+        uncerts = self.as_tuple_uncert()
+        
+        header = [ 'Measurement', 'Value', 'Uncertainty' ]
+        rows = [ [ apply_units(label, i), '%.3e' % value, '%.3e' % uncert ] for i, (label, value, uncert) in enumerate(zip(labels, values, uncerts)) ]
+        
+        return tabulate(rows, header, tablefmt='grid')
     
 @dataclass
 class ExponentialFitParameters(FitParameters):
@@ -121,8 +141,13 @@ class ExponentialFitParameters(FitParameters):
     def as_tuple(self):
         return (self.amplitude, self.tau, self.offset)
     
+    def as_tuple_uncert(self):
+        return (self.amplitude_uncert, 
+                self.tau_uncert, 
+                self.offset_uncert)
+    
     def as_equation_string(self):
-        return '%.3f * exp(-x/%.3f) + %.3f' % \
+        return '%.3e * exp(-x/%.3e) + %.3e' % \
                (self.amplitude, self.tau, self.offset)
     
     @staticmethod
@@ -147,8 +172,13 @@ class SinusoidalFitParameters(FitParameters):
     def as_tuple(self):
         return (self.amplitude, self.frequency, self.phase)
     
+    def as_tuple_uncert(self):
+        return (self.amplitude_uncert,
+               self.frequency_uncert,
+               self.phase_uncert)
+    
     def as_equation_string(self):
-        return '%.3f * sin(2 * pi * %.3f + %.3f)' % \
+        return '%.3e * sin(2 * pi * %.3e + %.3e)' % \
                (self.amplitude, self.frequency, self.phase)
     
     @staticmethod
@@ -168,8 +198,14 @@ class OffsetSinusoidalFitParameters(SinusoidalFitParameters):
     def as_tuple(self):
         return (super().amplitude, super().frequency, super().phase, self.offset)
     
+    def as_tuple_uncert(self):
+        return (super().amplitude_uncert,
+                super().frequency_uncert, 
+                super().phase_uncert, 
+                self.offset_uncert)
+    
     def as_equation_string(self):
-        return super().as_equation_string() + ' + %.3f' % self.offset
+        return super().as_equation_string() + ' + %.3e' % self.offset
     
     @staticmethod
     def offset_sine_func(x, amplitude, freq, phase, offset):
@@ -185,6 +221,17 @@ class FitModelResult:
     parameters:        FitParameters = None
     chi2:              np.float64    = None
     covariance_matrix: np.array      = None
+    
+    def tabulate(self, print_cov=False, units=None):
+        print(self.parameters.tabulate(units=units))
+        print('Chi^2 = %.3e' % self.chi2)
+        
+        if print_cov:
+            print("Covariance Values:")
+            for i, fit_covariance in enumerate(self.covariance_matrix):
+                for j in range(i+1, len(fit_covariance)):
+                    print(f"{self.parameters.labels()[i]} and {self.parameters.labels()[j]}: {self.covariance_matrix[i,j]:.3e}")
+            print("\n")
 
     
 VOLTAGE_VERSUS_TIME_GRAPH_OPTIONS = GraphingOptions(
