@@ -16,6 +16,18 @@ class GraphingOptions:
     x_units: str = ''
     y_units: str = ''
     
+    data_marker:      str   = '.'
+    data_marker_size: int   = 2
+    data_linestyle:   str   = ''
+    data_alpha:       float = 0.80
+    data_color:       str   = 'C0'
+    
+    model_marker:     str   = ''
+    model_linestyle:  str   = '-'
+    model_linewidth:  int   = 2
+    model_alpha:      float = 1.0
+    model_color:      str   = 'darkred' 
+    
     data_round: int = 1
 
     def set_labels(self, xlabel=None, ylabel=None):
@@ -28,7 +40,50 @@ class GraphingOptions:
             plt.ylabel(f"{self.y_label} ({self.y_units})")
         else:
             plt.ylabel(ylabel)
+            
+    def plot_data(self, x, y, y_uncert, label=None):
+        plt.errorbar(x, y, yerr=y_uncert, 
+                     marker     = self.data_marker,
+                     markersize = self.data_marker_size,
+                     linestyle  = self.data_linestyle,
+                     alpha      = self.data_alpha,
+                     color      = self.data_color,
+                     label      = label)
+    
+    def plot_model(self, model_x, model_y, model):
+        plt.plot(model_x, model_y, 
+                 marker    = self.model_marker, 
+                 linestyle = self.model_linestyle, 
+                 linewidth = self.model_linewidth,
+                 alpha     = self.model_alpha,
+                 color     = self.model_color, 
+                 label     = f'Fit - {model.as_equation_string()}')
+    
+    def plot_residuals(self, x, residuals, y_uncert):
+        plt.errorbar(x, residuals, yerr=y_uncert, 
+                     marker     = self.data_marker,
+                     markersize = self.data_marker_size,
+                     linestyle  = self.data_linestyle,
+                     alpha      = self.data_alpha,
+                     color      = self.data_color,
+                     label      = "Residuals")
+        plt.axhline(y=0, 
+                    marker    = self.model_marker, 
+                    linestyle = self.model_linestyle, 
+                    linewidth = self.model_linewidth,
+                    alpha     = self.model_alpha,
+                    color     = self.model_color, 
+                    label     = f'Fit')
 
+    @staticmethod
+    def save_graph_and_close():
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png')
+        buf.seek(0)
+        graph = Image.open(buf)
+        plt.close()
+        return graph
+        
     def default_title(self):
         return f'{self.y_label} vs. {self.x_label}, Round {self.data_round}'
         
@@ -41,6 +96,9 @@ class FitType(Enum):
 class FitParameters(ABC):
     @abstractmethod
     def as_tuple(self): ...
+    
+    @abstractmethod
+    def as_equation_string(self): ...
     
     @classmethod
     @abstractmethod
@@ -63,6 +121,10 @@ class ExponentialFitParameters(FitParameters):
     def as_tuple(self):
         return (self.amplitude, self.tau, self.offset)
     
+    def as_equation_string(self):
+        return '%.3f * exp(-x/%.3f) + %.3f' % \
+               (self.amplitude, self.tau, self.offset)
+    
     @staticmethod
     def exponential_func(x, amplitude, tau, voffset):
         return amplitude * np.exp(-x/tau) + voffset
@@ -81,9 +143,13 @@ class SinusoidalFitParameters(FitParameters):
     @staticmethod
     def labels():
         return ('amplitude', 'frequency', 'phase')
-
+    
     def as_tuple(self):
         return (self.amplitude, self.frequency, self.phase)
+    
+    def as_equation_string(self):
+        return '%.3f * sin(2 * pi * %.3f + %.3f)' % \
+               (self.amplitude, self.frequency, self.phase)
     
     @staticmethod
     def sine_func(x, amplitude, freq, phase):
@@ -101,6 +167,9 @@ class OffsetSinusoidalFitParameters(SinusoidalFitParameters):
 
     def as_tuple(self):
         return (super().amplitude, super().frequency, super().phase, self.offset)
+    
+    def as_equation_string(self):
+        return super().as_equation_string() + ' + %.3f' % self.offset
     
     @staticmethod
     def offset_sine_func(x, amplitude, freq, phase, offset):
@@ -184,7 +253,7 @@ def pack_data(data, p, noise, trim_range=None, save=False, plot=False, graphing_
         while i - 1 < len(B):
             B[i-1] = np.mean(A[p*(i-1):p*i])
             i += 1
-            return B
+        return B
     
     x_raw, y_raw, indices = data
     x = pack(x_raw, p)
@@ -199,14 +268,14 @@ def pack_data(data, p, noise, trim_range=None, save=False, plot=False, graphing_
     y_uncert      = np.array([y_uncert_mean] * length)
 
     if trim_range is not None:
-        trim_indices = np.arange(trim_range[0], trim_range[1])
         x, x_uncert, y, y_uncert = \
-            map(lambda a: np.delete(a, trim_indices),
+            map(lambda a: a[trim_range[0]:trim_range[1]],
                 (x, x_uncert, y, y_uncert))
         indices = np.arange(0, len(x))
         
     if plot:        
-        plt.errorbar(indices, y, yerr=y_uncert, marker='.', linestyle='')
+        plt.figure()
+        graphing_options.plot_data(indices, y, y_uncert)
         graphing_options.set_labels()
         plt.xlabel('Index')
         plt.title('Packed Data')
@@ -247,31 +316,18 @@ def autofit(packed_data: tuple,
     x, x_uncert, y, y_uncert = packed_data
 
     # Define 500 points spanning the range of the x-data; for plotting smooth curves
-    xtheory = np.linspace(min(x), max(x), 500)
+    x_theory = np.linspace(min(x), max(x), 500)
 
     # Compare the guessed curve to the data for visual reference
-    y_guess = fit_function(xtheory, *guesses)
+    y_guess = fit_function(x_theory, *guesses)
 
     plt.figure()
-    plt.errorbar(x, y, yerr=y_uncert, marker=".", linestyle="", label="Measured data")
-    plt.plot(
-        xtheory,
-        y_guess,
-        marker="",
-        linestyle="-",
-        linewidth=1,
-        color="g",
-        label="Initial parameter guesses",
-    )
+    graphing_options.plot_data(x, y, y_uncert, label='Measured Data');
+    graphing_options.plot_model(x_theory, y_guess, initial_fit_parameters);
     graphing_options.set_labels();
-    plt.title(r"Comparison between the data and the intial parameter guesses")
+    plt.title('Initial Parameter Guess')
     plt.legend(loc="best", numpoints=1)
-
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png')
-    buf.seek(0)
-    results.initial_guess_graph = Image.open(buf)
-    plt.close()
+    results.initial_guess_graph = graphing_options.save_graph_and_close()
 
     # calculate the value of the model at each of the x-values of the data set
     y_fit = fit_function(x, *guesses)
@@ -280,16 +336,12 @@ def autofit(packed_data: tuple,
     residual = y - y_fit
 
     # Plot the residuals
-    plt.errorbar(x, residual, yerr=y_uncert, marker=".", linestyle="", label="residuals")
+    plt.figure()
+    graphing_options.plot_residuals(x, residual, y_uncert);
     graphing_options.set_labels()
     plt.ylabel(f"Residual y-y_fit [{graphing_options.y_units}]")
-    plt.title("Residuals using initial parameter guesses")
-
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png')
-    buf.seek(0)
-    results.initial_guess_residuals_graph = Image.open(buf)
-    plt.close()
+    plt.title("Residuals of Initial Parameter Guess")
+    results.initial_guess_residuals_graph = graphing_options.save_graph_and_close()
 
     fit_params, fit_cov = curve_fit(
         fit_function, x, y, sigma=y_uncert, 
@@ -327,7 +379,11 @@ def autofit(packed_data: tuple,
             results.parameters = ExponentialFitParameters(
                 amplitude = fit_params[0],
                 tau       = fit_params[1],
-                offset    = fit_params[2]
+                offset    = fit_params[2],
+                
+                amplitude_uncert = fit_params_error[0],
+                tau_uncert       = fit_params_error[1],
+                offset_uncert    = fit_params_error[2]
             )
             
     results.chi2 = chi_square(fit_function, fit_params, x, y, y_uncert)
@@ -339,24 +395,22 @@ def autofit(packed_data: tuple,
     residual = y-y_fit
 
     plt.figure()
-    plt.errorbar(x,y,yerr=y_uncert,marker='.',linestyle='',label="Measured data")
-    plt.plot(x_fitfunc, y_fitfunc, marker="", linestyle="-", linewidth=2,color="r", label="Fit")
+    graphing_options.plot_data(x, y, y_uncert, label='Measured Data');
+    graphing_options.plot_model(x_fitfunc, y_fitfunc, results.parameters);
     graphing_options.set_labels()
     plt.title('Best Fit of Function to Data')
     plt.legend(loc='best',numpoints=1)
-
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png')
-    buf.seek(0)
-    results.autofit_graph = Image.open(buf)
-    plt.close()
+    results.autofit_graph = graphing_options.save_graph_and_close()
 
     fig = plt.figure(figsize=(7,10))
     
     # The residuals plot
     ax1 = fig.add_subplot(2, 1, 1)
-    ax1.errorbar(x, residual, yerr=y_uncert,marker='.', linestyle='', label="Residual (y-y_fit)")
-    ax1.hlines(0,np.min(x),np.max(x),lw=2,alpha=0.8)
+    ax1.errorbar(x, residual, yerr=y_uncert,
+                 marker='.', 
+                 linestyle='', 
+                 label="Residual (y-y_fit)")
+    ax1.hlines(0,np.min(x),np.max(x),lw=2,alpha=0.8,color=graphing_options.model_color)
     ax1.set_xlabel(f"{graphing_options.x_label} [{graphing_options.x_units}]")
     ax1.set_ylabel(f"y-y_fit [{graphing_options.y_units}]")
     ax1.set_title('Residuals for the Best Fit')
