@@ -224,7 +224,7 @@ class FitModelResult:
     
     def tabulate(self, print_cov=False, units=None):
         print(self.parameters.tabulate(units=units))
-        print('Chi^2 = %.3e' % self.chi2)
+        print('Chi^2 = %.3f' % self.chi2)
         
         if print_cov:
             print("Covariance Values:")
@@ -341,6 +341,9 @@ def pack_data(data, p, noise, trim_range=None, save=False, plot=False, graphing_
 def chi_square(fit_function, fit_params, x, y, sigma):
     dof = len(x) - len(fit_params)
     return np.sum((y - fit_function(x, *fit_params)) ** 2 / sigma ** 2) / dof
+
+def calculate_t_score(a, da, b, db):
+    return np.abs(a - b) / np.sqrt(da ** 2 + db ** 2)
 
 def autofit(packed_data: tuple,
             graphing_options: GraphingOptions,
