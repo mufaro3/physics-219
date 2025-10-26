@@ -258,7 +258,7 @@ class OffsetLinearModel(Model):
 # **1-Parameter Linear Fit**
 # $$f(x, m) = mx$$
 
-class OffsetLinearModel(Model):
+class LinearModel(Model):
     def __init__(self, slope):
         def fit_function(x, slope):
             return slope * x
@@ -616,7 +616,7 @@ def autofit(data: Dataset, model: Model, graphing_options: GraphingOptions):
     # The residuals plot
     plt.figure()
     graphing_options.set_labels()
-    graphing_options.plot_residuals(data.x, guess_residuals, data.dy)
+    graphing_options.plot_residuals(data.x, residuals, data.dy)
     results.autofit_residuals_graph = graphing_options.save_graph_and_close()
 
     return results
